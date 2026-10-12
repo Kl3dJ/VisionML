@@ -1,6 +1,6 @@
 # VisionML
 
-Create venv py -m venv venv
+Create venv py -3.7 -m venv .venv
 
 Start vev .\venv\Scripts\Activate.ps1
 
