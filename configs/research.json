@@ -1,0 +1,25 @@
+{
+  "seed": 7,
+  "detector": "ORB",
+  "nfeatures": 3000,
+  "ratio_threshold": 0.75,
+  "lk_forward_backward_threshold_px": 1.5,
+  "frame_selection": "fixed",
+  "frame_step": 1,
+  "adaptive": {
+    "min_gap": 1,
+    "max_gap": 5,
+    "target_displacement_px": 12.0,
+    "weak_inlier_ratio": 0.5
+  },
+  "min_matches": 20,
+  "min_inliers": 15,
+  "min_inlier_ratio": 0.35,
+  "ransac_threshold_px": 3.0,
+  "homography_diagnostics": false,
+  "ground_normal_camera": null,
+  "camera": {
+    "K": null,
+    "distortion": null
+  }
+}

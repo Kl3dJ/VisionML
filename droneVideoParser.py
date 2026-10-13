@@ -111,22 +111,26 @@ class DroneVideoCSVParser:
         self._segment_last_local_idx: List[int] = []
         self._segment_last_frame: List[Optional[np.ndarray]] = []
 
-        for path in self.video_paths:
-            cap = cv2.VideoCapture(str(path))
-            if not cap.isOpened():
-                raise FileNotFoundError(f"Не вдалося відкрити відео: {path}")
-            self.cap_list.append(cap)
+        try:
+            for path in self.video_paths:
+                cap = cv2.VideoCapture(str(path))
+                self.cap_list.append(cap)
+                if not cap.isOpened():
+                    raise FileNotFoundError(f"Не вдалося відкрити відео: {path}")
 
-        self.df = self._load_csv()
-        self._compute_local_trajectory()
-        self._compute_pose_windows()
+            self.df = self._load_csv()
+            self._compute_local_trajectory()
+            self._compute_pose_windows()
 
-        if self.start_frame < 0 or self.start_frame >= len(self._sample_segment_ids):
-            raise ValueError("start_frame поза межами доступної траєкторії")
+            if self.start_frame < 0 or self.start_frame >= len(self._sample_segment_ids):
+                raise ValueError("start_frame поза межами доступної траєкторії")
 
-        self._frame_global_offset = 0
-        self._length = len(self._sample_segment_ids)
-        self.K = camera_matrix if camera_matrix is not None else self._default_k(fov_deg=self.drone_fov_deg)
+            self._frame_global_offset = 0
+            self._length = len(self._sample_segment_ids)
+            self.K = camera_matrix if camera_matrix is not None else self._default_k(fov_deg=self.drone_fov_deg)
+        except Exception:
+            self.close()
+            raise
 
         self._next_frame_idx = 0
         self._current_frame = None
@@ -146,10 +150,14 @@ class DroneVideoCSVParser:
         df["latitude"] = pd.to_numeric(df["OSD.latitude"], errors="coerce")
         df["longitude"] = pd.to_numeric(df["OSD.longitude"], errors="coerce")
         df = df.dropna(subset=["fly_time_sec", "latitude", "longitude"])
-        df = df.sort_values("fly_time_sec").reset_index(drop=True)
+        df = df.sort_values("fly_time_sec").drop_duplicates("fly_time_sec", keep="last").reset_index(drop=True)
 
         if len(df) == 0:
             raise ValueError("CSV does not contain valid lat/lon samples")
+        if not np.isfinite(df[["fly_time_sec", "latitude", "longitude"]].to_numpy()).all():
+            raise ValueError("CSV contains non-finite times or GPS coordinates")
+        if not df["latitude"].between(-90, 90).all() or not df["longitude"].between(-180, 180).all():
+            raise ValueError("CSV contains invalid latitude/longitude")
 
         return df
 
@@ -432,6 +440,11 @@ class DroneVideoCSVParser:
     def __iter__(self):
         for idx in range(self._length):
             yield self[idx]
+
+    def close(self):
+        """Release video handles after an experiment."""
+        for cap in self.cap_list:
+            cap.release()
 
     @property
     def K(self):

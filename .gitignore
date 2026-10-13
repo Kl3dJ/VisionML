@@ -207,6 +207,7 @@ tempCodeRunnerFile.py
 
 # Local datasets and generated runs.
 /data/
+/dataset/
 /runs/
 
 # Ruff stuff:

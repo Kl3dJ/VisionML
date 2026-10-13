@@ -56,9 +56,9 @@ def _lowe_ratio_test(
     значно менша, ніж до другого.
     """
     good = []
-    for m, n in matches:
-        if m.distance < ratio_threshold * n.distance:
-            good.append(m)
+    for pair in matches:
+        if len(pair) == 2 and pair[0].distance < ratio_threshold * pair[1].distance:
+            good.append(pair[0])
     return good
 
 
@@ -70,7 +70,7 @@ def _matched_points(
     """Перетворює DMatch-об'єкти на масиви координат."""
     pts_prev = np.float32([kp_prev[m.queryIdx].pt for m in good_matches])
     pts_curr = np.float32([kp_curr[m.trainIdx].pt for m in good_matches])
-    return pts_prev, pts_curr
+    return pts_prev.reshape(-1, 2), pts_curr.reshape(-1, 2)
 
 class FeatureMatcher:
 
@@ -92,6 +92,7 @@ class FeatureMatcher:
             30,
             0.01,
         ),
+        lk_forward_backward_threshold: Optional[float] = None,
     ):
         self.detector_type   = detector_type
         self.ratio_threshold = ratio_threshold
@@ -103,6 +104,7 @@ class FeatureMatcher:
         self.lk_win_size = tuple(lk_win_size)
         self.lk_max_level = int(lk_max_level)
         self.lk_criteria = lk_criteria
+        self.lk_forward_backward_threshold = lk_forward_backward_threshold
 
         self.detector        = self._init_detector(
             detector_type, orb_n_features, surf_hessian_threshold, sift_n_features
@@ -117,7 +119,10 @@ class FeatureMatcher:
         sift_n: int,
     ):
         if det_type == DetectorType.SIFT:
-            return cv2.xfeatures2d.SIFT_create(nfeatures=sift_n)
+            factory = getattr(cv2, "SIFT_create", None)
+            if factory is None:
+                factory = cv2.xfeatures2d.SIFT_create
+            return factory(nfeatures=sift_n)
         elif det_type == DetectorType.SURF:
             return cv2.xfeatures2d.SURF_create(hessianThreshold=surf_thresh)
         elif det_type == DetectorType.ORB:
@@ -196,6 +201,18 @@ class FeatureMatcher:
                 return None
 
             valid = status.ravel() == 1
+            valid &= np.isfinite(pts_curr.reshape(-1, 2)).all(axis=1)
+            if self.lk_forward_backward_threshold is not None:
+                pts_back, backward_status, _ = cv2.calcOpticalFlowPyrLK(
+                    gray_curr, gray_prev, pts_curr, None,
+                    winSize=self.lk_win_size, maxLevel=self.lk_max_level, criteria=self.lk_criteria)
+                if pts_back is None or backward_status is None:
+                    return None
+                error = np.linalg.norm(pts_back.reshape(-1, 2) - pts_prev.reshape(-1, 2), axis=1)
+                valid &= (backward_status.ravel() == 1) & (error <= self.lk_forward_backward_threshold)
+            coordinates = pts_curr.reshape(-1, 2)
+            valid &= ((coordinates[:, 0] >= 0) & (coordinates[:, 0] < gray_curr.shape[1]) &
+                      (coordinates[:, 1] >= 0) & (coordinates[:, 1] < gray_curr.shape[0]))
             pts_prev_valid = pts_prev.reshape(-1, 2)[valid]
             pts_curr_valid = pts_curr.reshape(-1, 2)[valid]
 
@@ -221,7 +238,7 @@ class FeatureMatcher:
         kp_prev, des_prev = self.detector.detectAndCompute(gray_prev, None)
         kp_curr, des_curr = self.detector.detectAndCompute(gray_curr, None)
 
-        if des_prev is None or des_curr is None:
+        if des_prev is None or des_curr is None or len(des_curr) < 2:
             return None
         if len(kp_prev) < min_matches or len(kp_curr) < min_matches:
             return None
@@ -230,6 +247,10 @@ class FeatureMatcher:
         raw_matches = self.matcher.knnMatch(des_prev, des_curr, k=2)
 
         good_matches = _lowe_ratio_test(raw_matches, self.ratio_threshold)
+        unique = {}
+        for match in sorted(good_matches, key=lambda item: (item.distance, item.queryIdx, item.trainIdx)):
+            unique.setdefault(match.trainIdx, match)
+        good_matches = list(unique.values())
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
