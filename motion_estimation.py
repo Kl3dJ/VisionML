@@ -719,6 +719,9 @@ if __name__ == "__main__":
     )
     args = parser_args.parse_args()
 
+    if args.no_plot:
+        plt.switch_backend("Agg")
+
     DATASET_PATH = "dataset/"
     parser = build_parser(args, dataset_path=DATASET_PATH)
     logging.info(parser.summary())
